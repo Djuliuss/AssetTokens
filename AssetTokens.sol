@@ -1,6 +1,7 @@
-pragma solidity 0.4.24;
+pragma solidity ^0.4.24;
 import "./SafeMath.sol";
 import "./Owned.sol";
+import "./InvestPlatformI.sol";
 
 contract AssetTokens is Owned {
     using SafeMath for uint;
@@ -12,11 +13,12 @@ contract AssetTokens is Owned {
     uint public priceToken;
     mapping(address => uint) balances;
     Status public status;
+    address platform;
 
     address buyer;
     uint salePrice;
 
-    event LogAssetCreated(bytes32 name, uint totalSupply, uint price, address indexed owner);
+    event LogAssetCreated(bytes32 indexed name, uint totalSupply, uint price, address indexed owner, address indexed platform);
     event LogTransfer(address indexed payee, uint tokens);
     event LogApproval(address indexed investor, uint tokens);
     event LogWithdrawal(uint amount);
@@ -28,18 +30,20 @@ contract AssetTokens is Owned {
         require(status == Status.Open, "Status is not open`");
         _;
     }
-
-    constructor (bytes32 _name, uint _totalSupplyTokens, uint _priceToken) public {
+    
+    constructor (bytes32 _name, uint _totalSupplyTokens, uint _priceToken, address _platform) public {
         name = _name;
         totalSupplyTokens = _totalSupplyTokens;
         priceToken = _priceToken;
         balances[getOwner()] = _totalSupplyTokens;        
         status = Status.Open;
-        emit LogAssetCreated(_name, _totalSupplyTokens, _priceToken, getOwner());
+        platform = _platform;
+        emit LogAssetCreated(_name, _totalSupplyTokens, _priceToken, getOwner(), _platform);
     }
 
     function sellTokens(uint tokens) isOpen public payable returns (bool success) {
         require(msg.value >= tokens.mul(priceToken), "Not enough ether for purchase");
+        require(InvestmentPlatformI(platform).getInvestorStatus(msg.sender), "Investor not authorized");
         balances[getOwner()] -= tokens;
         balances[msg.sender] += tokens;
         emit LogTransfer(msg.sender, tokens);
@@ -51,7 +55,8 @@ contract AssetTokens is Owned {
         emit LogWithdrawal(amount);
     }
     
-    function approveSaleAsset(address _buyer, uint _salePrice) isOpen fromOwner public returns (bool sucess) {
+    function approveSaleAsset(address _buyer, uint _salePrice) isOpen public returns (bool sucess) {
+        require(msg.sender == platform, "Sender is not platform");
         buyer = _buyer;
         salePrice = _salePrice;
         emit LogAprroveSaleAsset(_buyer, _salePrice);
@@ -72,6 +77,12 @@ contract AssetTokens is Owned {
         balances[msg.sender] = 0;
         emit LogWithdrawShare(msg.sender);
         msg.sender.transfer(amount);
+    }
+    
+    function killAsset() public {
+         require(msg.sender == platform, "Sender is not platform");
+         require(address(this).balance == 0, "Balance is not zero");
+         selfdestruct(platform);
     }
     
     function () public payable {
